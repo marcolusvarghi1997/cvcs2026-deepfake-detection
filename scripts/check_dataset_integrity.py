@@ -17,11 +17,12 @@ except Exception:
 # CONFIG DA MODIFICARE
 # ============================================================
 
-JSONL_NAME = "cnndetection.jsonl"
+JSONL_NAME = "d3_train_100k.jsonl"
 # Esempi:
-# JSONL_NAME = "df40.jsonl"
-# JSONL_NAME = "d3_train_100k.jsonl"
 # JSONL_NAME = "cnndetection.jsonl"
+# JSONL_NAME = "df40.jsonl"
+# JSONL_NAME = "openfake.jsonl"
+# JSONL_NAME = "d3_train_100k.jsonl"
 
 ROOT = Path("/work/cvcs2026/resnet_gang/datasets/json_standardized")
 JSON_DIR = ROOT / "json"
@@ -36,7 +37,7 @@ VERIFY_IMAGES = "header"
 
 CHECK_ORPHANS = True
 
-PROGRESS_EVERY = 10_000
+PROGRESS_EVERY = 1_000
 MAX_SAMPLES = 2_000
 
 STRICT_REAL_GENERATOR = False
