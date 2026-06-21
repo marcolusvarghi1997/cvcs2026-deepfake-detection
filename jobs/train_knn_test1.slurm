@@ -1,21 +1,21 @@
 #!/bin/bash
-#SBATCH --job-name=d3_train_100k_check_dataset_integrity
+#SBATCH --job-name=train_knn_test1_CLIP
 #SBATCH --partition=all_usr_prod
 #SBATCH --account=cvcs2026
 #SBATCH --qos=all_qos_dbg
 #SBATCH --time=12:00:00
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 
-#SBATCH --output=/work/cvcs2026/resnet_gang/joblogs/%j_%x.out
-#SBATCH --error=/work/cvcs2026/resnet_gang/joblogs/%j_%x.err
+#SBATCH --output=/work/cvcs2026/resnet_gang/logs/%j_%x.out
+#SBATCH --error=/work/cvcs2026/resnet_gang/logs/%j_%x.err
 
 set -euo pipefail
 
-SCRIPT_NAME="check_dataset_integrity.py"
+SCRIPT_NAME="train_knn_test1.py"
 
 cd /work/cvcs2026/resnet_gang
-mkdir -p joblogs
+mkdir -p logs
 
 cd /homes/mlusvarghi/cvcs2026
 
