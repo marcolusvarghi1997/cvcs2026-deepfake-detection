@@ -28,7 +28,7 @@ ROOT = Path("/work/cvcs2026/resnet_gang/datasets/json_standardized")
 JSON_DIR = ROOT / "json"
 IMAGES_DIR = ROOT / "images"
 
-OUT_DIR = Path("/work/cvcs2026/resnet_gang/outputs/integrity")
+OUT_DIR = Path("/work/cvcs2026/resnet_gang/outputs/datasets_integrity")
 
 VERIFY_IMAGES = "header"
 # "none"   -> controlla solo esistenza file
