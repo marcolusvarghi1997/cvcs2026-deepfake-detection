@@ -2,16 +2,14 @@
 
 set -euo pipefail
 
-DEEPFAKEBENCH_ROOT="${DEEPFAKEBENCH_ROOT:-/work/cvcs2026/resnet_gang/external/DeepfakeBench}"
-
 SBATCH_FILE="/homes/mlusvarghi/cvcs2026/jobs/detection_from_paper/detection_DeepfakeBench.sbatch"
 
+DEEPFAKEBENCH_ROOT="/work/cvcs2026/resnet_gang/external/DeepfakeBench"
 CONFIG_DIR="${DEEPFAKEBENCH_ROOT}/training/config/detector"
 WEIGHTS_DIR="${DEEPFAKEBENCH_ROOT}/training/weights"
 
-JSONL_PATH="/work/cvcs2026/resnet_gang/datasets/json_standardized/json/openfake.jsonl"
-
-OUTPUT_ROOT="/work/cvcs2026/resnet_gang/outputs/detectors_from_deepfakebench/detection_from_paper"
+module load python/3.10.16-gcc-11.4.0
+source /work/cvcs2026/resnet_gang/env.sh
 
 DETECTORS=(
     effort
@@ -89,71 +87,49 @@ find_weights() {
     return 1
 }
 
+if [[ ! -f "${SBATCH_FILE}" ]]; then
+    echo "File sbatch non trovato: ${SBATCH_FILE}"
+    exit 1
+fi
+
 if [[ ! -d "${DEEPFAKEBENCH_ROOT}" ]]; then
-    echo "[ERROR] DeepfakeBench non trovato:"
-    echo "${DEEPFAKEBENCH_ROOT}"
+    echo "Repository DeepfakeBench non trovato: ${DEEPFAKEBENCH_ROOT}"
     exit 1
 fi
 
 if [[ ! -d "${CONFIG_DIR}" ]]; then
-    echo "[ERROR] Directory config non trovata:"
-    echo "${CONFIG_DIR}"
+    echo "Directory config non trovata: ${CONFIG_DIR}"
     exit 1
 fi
 
 if [[ ! -d "${WEIGHTS_DIR}" ]]; then
-    echo "[ERROR] Directory checkpoint non trovata:"
-    echo "${WEIGHTS_DIR}"
+    echo "Directory pesi non trovata: ${WEIGHTS_DIR}"
     exit 1
 fi
 
-if [[ ! -f "${SBATCH_FILE}" ]]; then
-    echo "[ERROR] File sbatch non trovato:"
-    echo "${SBATCH_FILE}"
-    exit 1
-fi
-
-if [[ ! -f "${JSONL_PATH}" ]]; then
-    echo "[ERROR] JSONL non trovato:"
-    echo "${JSONL_PATH}"
-    exit 1
-fi
-
-submitted=0
-skipped=0
-
-for detector in "${DETECTORS[@]}"; do
-    if ! config_path="$(find_config "${detector}")"; then
-        echo "[SKIP] ${detector}: config non trovato"
-        ((skipped+=1))
+for DETECTOR in "${DETECTORS[@]}"; do
+    if ! CONFIG_PATH="$(find_config "${DETECTOR}")"; then
+        echo "Config non trovato per ${DETECTOR}"
         continue
     fi
 
-    if ! weights_path="$(find_weights "${detector}")"; then
-        echo "[SKIP] ${detector}: checkpoint non trovato"
-        ((skipped+=1))
+    if ! WEIGHTS_PATH="$(find_weights "${DETECTOR}")"; then
+        echo "Checkpoint non trovato per ${DETECTOR}"
         continue
     fi
+
+    JOB_NAME="DeepfakeBench_${DETECTOR}_openfake_official"
 
     echo "============================================================"
-    echo "[SUBMIT] ${detector}"
-    echo "CONFIG  = ${config_path}"
-    echo "WEIGHTS = ${weights_path}"
+    echo "DETECTOR: ${DETECTOR}"
+    echo "CONFIG:   ${CONFIG_PATH}"
+    echo "WEIGHTS:  ${WEIGHTS_PATH}"
     echo "============================================================"
 
     sbatch \
-        --job-name="dfb_${detector}_openfake" \
-        --export=ALL,\
-DETECTOR="${detector}",\
-CONFIG_PATH="${config_path}",\
-WEIGHTS_PATH="${weights_path}",\
-DEEPFAKEBENCH_ROOT="${DEEPFAKEBENCH_ROOT}",\
-JSONL_PATH="${JSONL_PATH}",\
-OUTPUT_ROOT="${OUTPUT_ROOT}" \
-        "${SBATCH_FILE}"
-
-    ((submitted+=1))
+        --job-name="${JOB_NAME}" \
+        "${SBATCH_FILE}" \
+        "${DETECTOR}" \
+        "${CONFIG_PATH}" \
+        "${WEIGHTS_PATH}"
 done
-
-echo "Job inviati: ${submitted}"
-echo "Detector saltati: ${skipped}"
