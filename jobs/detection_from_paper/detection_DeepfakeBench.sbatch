@@ -11,9 +11,9 @@
 
 set -euo pipefail
 
-: "${DETECTOR:?DETECTOR non impostato}"
-: "${CONFIG_PATH:?CONFIG_PATH non impostato}"
-: "${WEIGHTS_PATH:?WEIGHTS_PATH non impostato}"
+DETECTOR="${1:?Argomento DETECTOR mancante}"
+CONFIG_PATH="${2:?Argomento CONFIG_PATH mancante}"
+WEIGHTS_PATH="${3:?Argomento WEIGHTS_PATH mancante}"
 
 PYTHON_SCRIPT="/homes/mlusvarghi/cvcs2026/scripts/detection_from_paper/detection_DeepfakeBench.py"
 

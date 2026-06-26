@@ -13,14 +13,14 @@
 
 set -euo pipefail
 
-SCRIPT_NAME="check_env.py"
+SCRIPT_NAME="check_env2.py"
 
 cd /homes/mlusvarghi/cvcs2026
 mkdir -p logs
 
 module load python/3.10.16-gcc-11.4.0
 
-source /work/cvcs2026/resnet_gang/env.sh
+source /work/cvcs2026/resnet_gang/env2.sh
 
 echo "START $(date)"
 echo "JOB ${SLURM_JOB_ID} on $(hostname)"
