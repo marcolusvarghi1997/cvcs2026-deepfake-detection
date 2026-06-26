@@ -1,11 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=check_env
-#SBATCH --partition=boost_usr_prod
+#SBATCH --partition=all_usr_prod
 #SBATCH --account=cvcs2026
 #SBATCH --qos=all_qos_dbg
 #SBATCH --time=1:00:00
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=128G
+#SBATCH --gres=gpu:1
 
 #SBATCH --output=/homes/mlusvarghi/cvcs2026/logs/%x_%j.out
 #SBATCH --error=/homes/mlusvarghi/cvcs2026/logs/%x_%j.err
