@@ -15,13 +15,13 @@ DETECTOR="${1:?Argomento DETECTOR mancante}"
 CONFIG_PATH="${2:?Argomento CONFIG_PATH mancante}"
 WEIGHTS_PATH="${3:?Argomento WEIGHTS_PATH mancante}"
 
-PYTHON_SCRIPT="/homes/mlusvarghi/cvcs2026/scripts/detection_from_paper/detection_DeepfakeBench.py"
+PYTHON_SCRIPT="/homes/mlusvarghi/cvcs2026/scripts/detection_from_paper/detection_DeepfakeBench_official.py"
 
 DEEPFAKEBENCH_ROOT="${DEEPFAKEBENCH_ROOT:-/work/cvcs2026/resnet_gang/external/DeepfakeBench}"
 
 JSONL_PATH="${JSONL_PATH:-/work/cvcs2026/resnet_gang/datasets/json_standardized/json/openfake.jsonl}"
 
-OUTPUT_ROOT="${OUTPUT_ROOT:-/work/cvcs2026/resnet_gang/outputs/detectors_from_deepfakebench/detection_from_paper}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-/work/cvcs2026/resnet_gang/outputs/DeepfakeBench/detection_from_paper}"
 
 BATCH_SIZE="${BATCH_SIZE:-32}"
 NUM_WORKERS="${NUM_WORKERS:-8}"

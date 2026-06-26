@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-SBATCH_FILE="/homes/mlusvarghi/cvcs2026/jobs/detection_from_paper/detection_DeepfakeBench.sbatch"
+SBATCH_FILE="/homes/mlusvarghi/cvcs2026/jobs/detection_from_paper/detection_DeepfakeBench_official.sbatch"
 
 DEEPFAKEBENCH_ROOT="/work/cvcs2026/resnet_gang/external/DeepfakeBench"
 CONFIG_DIR="${DEEPFAKEBENCH_ROOT}/training/config/detector"

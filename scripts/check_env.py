@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import os
-import time
+import sys
 import socket
 import subprocess
 from datetime import datetime
@@ -26,7 +26,10 @@ def run(cmd: str):
             print(result.stderr, flush=True)
 
         if result.returncode != 0:
-            print(f"WARNING: command exited with code {result.returncode}", flush=True)
+            print(
+                f"WARNING: command exited with code {result.returncode}",
+                flush=True,
+            )
 
     except Exception as e:
         print(f"ERROR running command: {repr(e)}", flush=True)
@@ -40,7 +43,15 @@ print("DATE:", datetime.now(), flush=True)
 print("HOSTNAME:", socket.gethostname(), flush=True)
 print("USER:", os.getenv("USER"), flush=True)
 print("PWD:", os.getcwd(), flush=True)
+print("PYTHON:", sys.executable, flush=True)
+print("PYTHON VERSION:", sys.version, flush=True)
+print("VIRTUAL_ENV:", os.getenv("VIRTUAL_ENV"), flush=True)
 print("CUDA_VISIBLE_DEVICES:", os.getenv("CUDA_VISIBLE_DEVICES"), flush=True)
+print("LD_LIBRARY_PATH:", os.getenv("LD_LIBRARY_PATH"), flush=True)
+
+run("which python")
+run("python -m pip --version")
+run("python -m pip show torch torchvision torchaudio")
 
 print("\n" + "=" * 80, flush=True)
 print("SLURM VARIABLES", flush=True)
@@ -49,6 +60,12 @@ print("=" * 80, flush=True)
 for key in sorted(os.environ):
     if key.startswith("SLURM"):
         print(f"{key}={os.environ[key]}", flush=True)
+
+print("\n" + "=" * 80, flush=True)
+print("LOADED MODULES", flush=True)
+print("=" * 80, flush=True)
+
+run("module list")
 
 print("\n" + "=" * 80, flush=True)
 print("GPU CHECK", flush=True)
@@ -69,29 +86,58 @@ print("=" * 80, flush=True)
 
 try:
     import torch
+    import torchvision
 
     print("torch version:", torch.__version__, flush=True)
-    print("torch cuda available:", torch.cuda.is_available(), flush=True)
-    print("torch cuda device count:", torch.cuda.device_count(), flush=True)
+    print("torchvision version:", torchvision.__version__, flush=True)
+    print("torch installation:", torch.__file__, flush=True)
 
-    if torch.cuda.is_available():
-        for i in range(torch.cuda.device_count()):
-            print(f"\nGPU {i}", flush=True)
-            print("name:", torch.cuda.get_device_name(i), flush=True)
+    print("PyTorch compiled CUDA version:", torch.version.cuda, flush=True)
+    print("cuDNN version:", torch.backends.cudnn.version(), flush=True)
+    print("cuDNN enabled:", torch.backends.cudnn.enabled, flush=True)
 
-            props = torch.cuda.get_device_properties(i)
-            print("total memory GB:", round(props.total_memory / 1024**3, 2), flush=True)
+    print("CUDA available:", torch.cuda.is_available(), flush=True)
+    print("CUDA device count:", torch.cuda.device_count(), flush=True)
 
-            x = torch.randn(4096, 4096, device=f"cuda:{i}")
-            y = torch.matmul(x, x)
-            torch.cuda.synchronize(i)
+    if not torch.cuda.is_available():
+        raise RuntimeError("PyTorch does not see the GPU")
 
-            print("tensor test: OK", flush=True)
-    else:
-        print("PROBLEM: PyTorch does not see CUDA", flush=True)
+    for i in range(torch.cuda.device_count()):
+        print("\n" + "-" * 40, flush=True)
+        print(f"GPU {i}", flush=True)
+        print("-" * 40, flush=True)
+
+        props = torch.cuda.get_device_properties(i)
+
+        print("name:", torch.cuda.get_device_name(i), flush=True)
+        print("compute capability:", f"{props.major}.{props.minor}", flush=True)
+        print(
+            "total memory GB:",
+            round(props.total_memory / 1024**3, 2),
+            flush=True,
+        )
+
+        torch.cuda.set_device(i)
+
+        x = torch.randn(4096, 4096, device=f"cuda:{i}")
+        y = torch.matmul(x, x)
+
+        torch.cuda.synchronize(i)
+
+        print("tensor device:", y.device, flush=True)
+        print("tensor shape:", tuple(y.shape), flush=True)
+        print("tensor test: OK", flush=True)
+
+        del x
+        del y
+        torch.cuda.empty_cache()
+
+    print("\nPYTORCH CUDA TEST: SUCCESS", flush=True)
 
 except Exception as e:
-    print("TORCH ERROR:", repr(e), flush=True)
+    print("\nPYTORCH CUDA TEST: FAILED", flush=True)
+    print("ERROR:", repr(e), flush=True)
+    raise
 
 print("\n" + "=" * 80, flush=True)
 print("CPU CHECK", flush=True)
@@ -111,12 +157,6 @@ print("=" * 80, flush=True)
 
 run("df -h /work")
 run("df -h $HOME")
-
-print("\n" + "=" * 80, flush=True)
-print("KEEP JOB ALIVE FOR 60 SECONDS", flush=True)
-print("=" * 80, flush=True)
-
-time.sleep(60)
 
 print("\nCHECK COMPLETED", flush=True)
 print("END DATE:", datetime.now(), flush=True)
