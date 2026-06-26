@@ -1,7 +1,6 @@
 #!/bin/bash
 #SBATCH --partition=all_usr_prod
 #SBATCH --account=cvcs2026
-#SBATCH --qos=all_qos_dbg
 #SBATCH --time=12:00:00
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G

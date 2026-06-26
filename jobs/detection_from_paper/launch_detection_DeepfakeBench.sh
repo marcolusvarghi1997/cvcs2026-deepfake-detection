@@ -2,134 +2,105 @@
 
 set -euo pipefail
 
+ROOT="/work/cvcs2026/resnet_gang/external/deepfakebench"
+WEIGHTS_DIR="${ROOT}/weights"
+CONFIG_DIR="${ROOT}/training/config/detector"
+
 SBATCH_FILE="/homes/mlusvarghi/cvcs2026/jobs/detection_from_paper/detection_DeepfakeBench_official.sbatch"
 
-DEEPFAKEBENCH_ROOT="/work/cvcs2026/resnet_gang/external/DeepfakeBench"
-CONFIG_DIR="${DEEPFAKEBENCH_ROOT}/training/config/detector"
-WEIGHTS_DIR="${DEEPFAKEBENCH_ROOT}/training/weights"
-
-module load python/3.10.16-gcc-11.4.0
-source /work/cvcs2026/resnet_gang/env.sh
-
 DETECTORS=(
-    effort
-    clip
-    cnn_aug
-    xception
-    efficientnetb4
-    f3net
-    spsl
-    srm
+capsule
+cnnaug
+core
+effnb4
+f3net
+ffd
+meso4Incep
+meso4
+recce
+spsl
+srm
+ucf
+xception
 )
 
-declare -A CONFIG_CANDIDATES
+declare -A WEIGHTS=(
+[capsule]="capsule_best.pth"
+[cnnaug]="cnnaug_best.pth"
+[core]="core_best.pth"
+[effnb4]="effnb4_best.pth"
+[f3net]="f3net_best.pth"
+[ffd]="ffd_best.pth"
+[meso4Incep]="meso4Incep_best.pth"
+[meso4]="meso4_best.pth"
+[recce]="recce_best.pth"
+[spsl]="spsl_best.pth"
+[srm]="srm_best.pth"
+[ucf]="ucf_best.pth"
+[xception]="xception_best.pth"
+)
 
-CONFIG_CANDIDATES[effort]="effort.yaml"
-CONFIG_CANDIDATES[clip]="clip.yaml"
-CONFIG_CANDIDATES[cnn_aug]="resnet34.yaml cnn_aug.yaml cnn-aug.yaml"
-CONFIG_CANDIDATES[xception]="xception.yaml"
-CONFIG_CANDIDATES[efficientnetb4]="efficientnetb4.yaml efficientnet_b4.yaml efficientnet.yaml"
-CONFIG_CANDIDATES[f3net]="f3net.yaml"
-CONFIG_CANDIDATES[spsl]="spsl.yaml"
-CONFIG_CANDIDATES[srm]="srm.yaml"
+declare -A CONFIGS=(
+[capsule]="capsule_net.yaml"
+[cnnaug]="resnet34.yaml"
+[core]="core.yaml"
+[effnb4]="efficientnetb4.yaml"
+[f3net]="f3net.yaml"
+[ffd]="ffd.yaml"
+[meso4Incep]="meso4Inception.yaml"
+[meso4]="meso4.yaml"
+[recce]="recce.yaml"
+[spsl]="spsl.yaml"
+[srm]="srm.yaml"
+[ucf]="ucf.yaml"
+[xception]="xception.yaml"
+)
 
-declare -A WEIGHT_PATTERNS
-
-WEIGHT_PATTERNS[effort]="effort"
-WEIGHT_PATTERNS[clip]="clip"
-WEIGHT_PATTERNS[cnn_aug]="resnet34 cnn_aug cnn-aug"
-WEIGHT_PATTERNS[xception]="xception"
-WEIGHT_PATTERNS[efficientnetb4]="efficientnetb4 efficientnet_b4 efficientnet"
-WEIGHT_PATTERNS[f3net]="f3net"
-WEIGHT_PATTERNS[spsl]="spsl"
-WEIGHT_PATTERNS[srm]="srm"
-
-find_config() {
-    local detector="$1"
-    local candidate
-
-    for candidate in ${CONFIG_CANDIDATES[$detector]}; do
-        if [[ -f "${CONFIG_DIR}/${candidate}" ]]; then
-            printf '%s\n' "${CONFIG_DIR}/${candidate}"
-            return 0
-        fi
-    done
-
-    return 1
-}
-
-find_weights() {
-    local detector="$1"
-    local pattern
-    local result
-
-    for pattern in ${WEIGHT_PATTERNS[$detector]}; do
-        result="$(
-            find "${WEIGHTS_DIR}" \
-                -maxdepth 3 \
-                -type f \
-                \( \
-                    -iname "*${pattern}*best*.pth" \
-                    -o -iname "*${pattern}*.pth" \
-                    -o -iname "*${pattern}*.pt" \
-                    -o -iname "*${pattern}*.ckpt" \
-                \) \
-                | sort \
-                | head -n 1
-        )"
-
-        if [[ -n "${result}" ]]; then
-            printf '%s\n' "${result}"
-            return 0
-        fi
-    done
-
-    return 1
-}
+if [[ ! -d "${ROOT}" ]]; then
+echo "Repository non trovata: ${ROOT}"
+exit 1
+fi
 
 if [[ ! -f "${SBATCH_FILE}" ]]; then
-    echo "File sbatch non trovato: ${SBATCH_FILE}"
-    exit 1
+echo "File sbatch non trovato: ${SBATCH_FILE}"
+exit 1
 fi
 
-if [[ ! -d "${DEEPFAKEBENCH_ROOT}" ]]; then
-    echo "Repository DeepfakeBench non trovato: ${DEEPFAKEBENCH_ROOT}"
-    exit 1
-fi
+REVISION="$(git -C "${ROOT}" describe --tags --always 2>/dev/null || true)"
 
-if [[ ! -d "${CONFIG_DIR}" ]]; then
-    echo "Directory config non trovata: ${CONFIG_DIR}"
-    exit 1
-fi
-
-if [[ ! -d "${WEIGHTS_DIR}" ]]; then
-    echo "Directory pesi non trovata: ${WEIGHTS_DIR}"
-    exit 1
+if [[ "${REVISION}" != "v1.0.1" ]]; then
+echo "DeepfakeBench deve essere fissato a v1.0.1"
+echo "Revisione corrente: ${REVISION:-sconosciuta}"
+exit 1
 fi
 
 for DETECTOR in "${DETECTORS[@]}"; do
-    if ! CONFIG_PATH="$(find_config "${DETECTOR}")"; then
-        echo "Config non trovato per ${DETECTOR}"
-        continue
-    fi
+CONFIG_PATH="${CONFIG_DIR}/${CONFIGS[$DETECTOR]}"
+WEIGHTS_PATH="${WEIGHTS_DIR}/${WEIGHTS[$DETECTOR]}"
+JOB_NAME="DFB_${DETECTOR}_OpenFake"
 
-    if ! WEIGHTS_PATH="$(find_weights "${DETECTOR}")"; then
-        echo "Checkpoint non trovato per ${DETECTOR}"
-        continue
-    fi
 
-    JOB_NAME="DeepfakeBench_${DETECTOR}_openfake_official"
+if [[ ! -f "${CONFIG_PATH}" ]]; then
+    echo "Config non trovata: ${CONFIG_PATH}"
+    exit 1
+fi
 
-    echo "============================================================"
-    echo "DETECTOR: ${DETECTOR}"
-    echo "CONFIG:   ${CONFIG_PATH}"
-    echo "WEIGHTS:  ${WEIGHTS_PATH}"
-    echo "============================================================"
+if [[ ! -s "${WEIGHTS_PATH}" ]]; then
+    echo "Checkpoint non trovato o vuoto: ${WEIGHTS_PATH}"
+    exit 1
+fi
 
+JOB_ID="$(
     sbatch \
+        --parsable \
         --job-name="${JOB_NAME}" \
         "${SBATCH_FILE}" \
         "${DETECTOR}" \
         "${CONFIG_PATH}" \
         "${WEIGHTS_PATH}"
+)"
+
+echo "${DETECTOR}: job ${JOB_ID}"
+
+
 done
