@@ -660,6 +660,29 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     config = load_config(config_path)
+
+    if config.get("pretrained"):
+        pretrained_name = Path(str(config["pretrained"])).name
+
+        local_pretrained = (
+            deepfakebench_root
+            / "training"
+            / "pretrained"
+            / pretrained_name
+        )
+
+        if not local_pretrained.is_file():
+            raise FileNotFoundError(
+                f"Pretrained backbone non trovato: {local_pretrained}"
+            )
+
+        print(
+            f"Pretrained backbone corretto: "
+            f"{config['pretrained']} -> {local_pretrained}"
+        )
+
+        config["pretrained"] = str(local_pretrained)
+
     resolution = int(config["resolution"])
     mean = config["mean"]
     std = config["std"]
