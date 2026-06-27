@@ -64,8 +64,8 @@ GENERATOR_FIELDS = (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Valuta un checkpoint ufficiale Effort sul test OpenFake "
-            "e salva predizioni, metriche globali e metriche per generatore."
+            "Valuta un singolo checkpoint Effort direttamente sulle immagini "
+            "complete indicate dal JSONL OpenFake, senza face detection o face crop."
         )
     )
 
@@ -412,10 +412,23 @@ def strip_prefix(
     }
 
 
-def choose_exact_state_dict(
+ALLOWED_REBUILT_SUFFIXES = (
+    ".U_r",
+    ".S_r",
+    ".V_r",
+)
+
+
+def choose_compatible_state_dict(
     raw_state_dict: dict[str, torch.Tensor],
     model_state: dict[str, torch.Tensor],
-) -> tuple[dict[str, torch.Tensor], str]:
+) -> tuple[
+    dict[str, torch.Tensor],
+    str,
+    list[str],
+    list[str],
+    list[str],
+]:
     candidates: list[tuple[str, dict[str, torch.Tensor]]] = [
         ("original", raw_state_dict),
         ("strip_module", strip_prefix(raw_state_dict, "module.")),
@@ -423,55 +436,84 @@ def choose_exact_state_dict(
     ]
 
     module_stripped = strip_prefix(raw_state_dict, "module.")
-    candidates.append(
-        (
-            "strip_module_then_model",
-            strip_prefix(module_stripped, "model."),
-        )
+    model_stripped = strip_prefix(raw_state_dict, "model.")
+
+    candidates.extend(
+        [
+            (
+                "strip_module_then_model",
+                strip_prefix(module_stripped, "model."),
+            ),
+            (
+                "strip_model_then_module",
+                strip_prefix(model_stripped, "module."),
+            ),
+        ]
     )
 
     model_keys = set(model_state.keys())
+    best_report: dict[str, Any] | None = None
 
     for name, candidate in candidates:
-        if set(candidate.keys()) != model_keys:
-            continue
+        candidate_keys = set(candidate.keys())
 
-        shape_errors = [
+        missing = sorted(model_keys - candidate_keys)
+        unexpected = sorted(candidate_keys - model_keys)
+        shape_mismatch = sorted(
             key
-            for key, value in candidate.items()
-            if tuple(value.shape) != tuple(model_state[key].shape)
+            for key in candidate_keys & model_keys
+            if tuple(candidate[key].shape)
+            != tuple(model_state[key].shape)
+        )
+
+        invalid_missing = [
+            key
+            for key in missing
+            if not key.endswith(ALLOWED_REBUILT_SUFFIXES)
         ]
 
-        if not shape_errors:
-            return candidate, name
+        if (
+            not invalid_missing
+            and not unexpected
+            and not shape_mismatch
+        ):
+            return (
+                candidate,
+                name,
+                missing,
+                unexpected,
+                shape_mismatch,
+            )
 
-    best_name = ""
-    best_candidate: dict[str, torch.Tensor] = {}
-    best_overlap = -1
+        overlap = len(candidate_keys & model_keys)
 
-    for name, candidate in candidates:
-        overlap = len(set(candidate.keys()) & model_keys)
-        if overlap > best_overlap:
-            best_name = name
-            best_candidate = candidate
-            best_overlap = overlap
+        if best_report is None or overlap > best_report["overlap"]:
+            best_report = {
+                "name": name,
+                "overlap": overlap,
+                "missing": missing,
+                "invalid_missing": invalid_missing,
+                "unexpected": unexpected,
+                "shape_mismatch": shape_mismatch,
+            }
 
-    missing = sorted(model_keys - set(best_candidate.keys()))
-    unexpected = sorted(set(best_candidate.keys()) - model_keys)
-    shape_mismatch = sorted(
-        key
-        for key in set(best_candidate.keys()) & model_keys
-        if tuple(best_candidate[key].shape)
-        != tuple(model_state[key].shape)
-    )
+    assert best_report is not None
 
     raise RuntimeError(
-        "Checkpoint incompatibile con il modello.\n"
-        f"Migliore trasformazione tentata: {best_name}\n"
-        f"Chiavi coincidenti: {best_overlap}/{len(model_keys)}\n"
-        f"Missing keys ({len(missing)}): {missing[:20]}\n"
-        f"Unexpected keys ({len(unexpected)}): {unexpected[:20]}\n"
-        f"Shape mismatch ({len(shape_mismatch)}): {shape_mismatch[:20]}"
+        "Checkpoint incompatibile con il modello Effort.\n"
+        f"Migliore trasformazione: {best_report['name']}\n"
+        f"Chiavi coincidenti: "
+        f"{best_report['overlap']}/{len(model_keys)}\n"
+        f"Missing totali ({len(best_report['missing'])}): "
+        f"{best_report['missing'][:20]}\n"
+        f"Missing non consentite "
+        f"({len(best_report['invalid_missing'])}): "
+        f"{best_report['invalid_missing'][:20]}\n"
+        f"Unexpected ({len(best_report['unexpected'])}): "
+        f"{best_report['unexpected'][:20]}\n"
+        f"Shape mismatch "
+        f"({len(best_report['shape_mismatch'])}): "
+        f"{best_report['shape_mismatch'][:20]}"
     )
 
 
@@ -494,15 +536,58 @@ def load_checkpoint(
     raw_state_dict = extract_raw_state_dict(checkpoint)
     model_state = model.state_dict()
 
-    state_dict, transformation = choose_exact_state_dict(
+    (
+        state_dict,
+        transformation,
+        expected_missing,
+        expected_unexpected,
+        shape_mismatch,
+    ) = choose_compatible_state_dict(
         raw_state_dict,
         model_state,
     )
 
-    model.load_state_dict(state_dict, strict=True)
+    load_result = model.load_state_dict(
+        state_dict,
+        strict=False,
+    )
 
-    loaded_elements = sum(tensor.numel() for tensor in state_dict.values())
-    model_elements = sum(tensor.numel() for tensor in model_state.values())
+    actual_missing = sorted(load_result.missing_keys)
+    actual_unexpected = sorted(load_result.unexpected_keys)
+
+    invalid_missing = [
+        key
+        for key in actual_missing
+        if not key.endswith(ALLOWED_REBUILT_SUFFIXES)
+    ]
+
+    if invalid_missing:
+        raise RuntimeError(
+            "Mancano parametri Effort non ricostruibili:\n"
+            f"{invalid_missing[:50]}"
+        )
+
+    if actual_unexpected:
+        raise RuntimeError(
+            "Il checkpoint contiene chiavi inattese:\n"
+            f"{actual_unexpected[:50]}"
+        )
+
+    if actual_missing != expected_missing:
+        raise RuntimeError(
+            "Incoerenza nel caricamento del checkpoint.\n"
+            f"Missing previste: {expected_missing[:20]}\n"
+            f"Missing effettive: {actual_missing[:20]}"
+        )
+
+    loaded_elements = sum(
+        tensor.numel()
+        for tensor in state_dict.values()
+    )
+    model_elements = sum(
+        tensor.numel()
+        for tensor in model_state.values()
+    )
 
     return {
         "checkpoint_tensor_count": len(raw_state_dict),
@@ -515,9 +600,10 @@ def load_checkpoint(
             else 0.0
         ),
         "key_transformation": transformation,
-        "missing_keys": [],
-        "unexpected_keys": [],
-        "shape_mismatch": {},
+        "missing_keys": actual_missing,
+        "unexpected_keys": expected_unexpected,
+        "shape_mismatch": shape_mismatch,
+        "reconstructed_svd_keys": actual_missing,
     }
 
 
@@ -704,6 +790,7 @@ def main() -> None:
 
     records = load_records(jsonl_path, image_root)
     print(f"Record OpenFake: {len(records)}")
+    print("Preprocessing: immagine completa, resize e normalizzazione; nessun face crop")
 
     missing_images = [
         record["image_path"]
@@ -852,6 +939,7 @@ def main() -> None:
             "amp": amp_enabled,
             "device": str(device),
             "gpu_name": torch.cuda.get_device_name(0),
+            "preprocessing": "whole_image_rgb_resize_normalize_no_face_detection",
             "elapsed_seconds": float(elapsed_seconds),
             "samples_per_second": float(
                 len(dataframe) / elapsed_seconds

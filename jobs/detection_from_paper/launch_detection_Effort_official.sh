@@ -50,4 +50,3 @@ for EFFORT_VARIANT in sdv14 chameleon; do
         "${EFFORT_VARIANT}" \
         "${WEIGHTS_PATH}"
 done
-
