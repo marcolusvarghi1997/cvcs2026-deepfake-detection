@@ -2,15 +2,13 @@
 
 set -euo pipefail
 
-SBATCH_FILE="/homes/mlusvarghi/cvcs2026/jobs/detection_from_paper/detection_Effort_official.sbatch"
-
+SBATCH_FILE="/homes/mlusvarghi/cvcs2026/jobs/detection_from_paper_social_like/detection_Effort_social_like.sbatch"
 CHECKPOINT_DIR="/work/cvcs2026/resnet_gang/external/Effort-AIGI-Detection/checkpoints"
 
 SDV14_WEIGHTS="${CHECKPOINT_DIR}/effort_clip_L14_trainOn_sdv14.pth"
 CHAMELEON_WEIGHTS="${CHECKPOINT_DIR}/effort_clip_L14_trainOn_chameleon.pth"
 
 module load python/3.10.16-gcc-11.4.0
-
 source /work/cvcs2026/resnet_gang/env.sh
 
 export HF_HOME=/work/cvcs2026/resnet_gang/.cache/huggingface
@@ -37,7 +35,7 @@ declare -A WEIGHTS_BY_VARIANT=(
 
 for EFFORT_VARIANT in sdv14 chameleon; do
     WEIGHTS_PATH="${WEIGHTS_BY_VARIANT[${EFFORT_VARIANT}]}"
-    JOB_NAME="Effort_${EFFORT_VARIANT}_openfake_official"
+    JOB_NAME="Effort_${EFFORT_VARIANT}_openfake_social_like"
 
     echo "Invio job:"
     echo "  nome:    ${JOB_NAME}"

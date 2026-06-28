@@ -1,138 +1,169 @@
+#!/usr/bin/env python3
+
+"""Protocollo deterministico di degradazione social-like condiviso tra detector."""
+
+from __future__ import annotations
+
 import hashlib
 import io
 import random
+from pathlib import Path
 
 from PIL import Image, ImageFilter
 
 
-def deterministic_seed(path: str, base_seed: int = 42) -> int:
-    value = f"{base_seed}:{path}".encode("utf-8")
-    digest = hashlib.sha256(value).digest()
-    return int.from_bytes(digest[:8], "big")
+SOCIAL_PROBABILITY = 0.7
+SOCIAL_SEED = 42
+SOCIAL_PROTOCOL_NAME = "openfake_social_like_v1"
+
+# L'ordine è fisso e fa parte del protocollo sperimentale.
+SOCIAL_TRANSFORM_ORDER = (
+    "resize_downsampling",
+    "crop",
+    "gaussian_blur",
+    "jpeg_compression",
+)
+
+# Intensità fissate centralmente.
+RESIZE_SCALE_RANGE = (0.50, 0.90)
+CROP_AREA_RANGE = (0.75, 0.95)
+CROP_ASPECT_RATIO_RANGE = (0.90, 1.10)
+BLUR_RADIUS_RANGE = (0.40, 1.60)
+JPEG_QUALITY_RANGE = (45, 85)
+
+# Resampling espliciti per rendere il protocollo riproducibile.
+_DOWNSAMPLE_RESAMPLE = Image.Resampling.BILINEAR
+_UPSAMPLE_RESAMPLE = Image.Resampling.BICUBIC
+_CROP_RESAMPLE = Image.Resampling.BICUBIC
 
 
-def jpeg_compression(
-    image: Image.Image,
-    quality: int,
-) -> Image.Image:
-    buffer = io.BytesIO()
-
-    image.convert("RGB").save(
-        buffer,
-        format="JPEG",
-        quality=quality,
-    )
-
-    buffer.seek(0)
-
-    with Image.open(buffer) as compressed:
-        return compressed.convert("RGB").copy()
+def _canonical_image_path(image_path: str) -> str:
+    """Normalizza il path senza richiedere che il file esista."""
+    return Path(image_path).expanduser().resolve(strict=False).as_posix()
 
 
-def resize_roundtrip(
-    image: Image.Image,
-    scale: float,
-) -> Image.Image:
+def _rng_for_image(image_path: str) -> random.Random:
+    """Crea un RNG locale deterministico per la singola immagine."""
+    material = (
+        f"{SOCIAL_PROTOCOL_NAME}\0"
+        f"{SOCIAL_SEED}\0"
+        f"{_canonical_image_path(image_path)}"
+    ).encode("utf-8")
+
+    digest = hashlib.sha256(material).digest()
+    seed = int.from_bytes(digest[:16], byteorder="big", signed=False)
+    return random.Random(seed)
+
+
+def _resize_downsampling(image: Image.Image, rng: random.Random) -> Image.Image:
+    original_size = image.size
+    scale = rng.uniform(*RESIZE_SCALE_RANGE)
+
+    width = max(1, round(original_size[0] * scale))
+    height = max(1, round(original_size[1] * scale))
+
+    image = image.resize((width, height), resample=_DOWNSAMPLE_RESAMPLE)
+    return image.resize(original_size, resample=_UPSAMPLE_RESAMPLE)
+
+
+def _crop(image: Image.Image, rng: random.Random) -> Image.Image:
     original_width, original_height = image.size
+    original_area = original_width * original_height
 
-    reduced_width = max(1, round(original_width * scale))
-    reduced_height = max(1, round(original_height * scale))
+    target_area = original_area * rng.uniform(*CROP_AREA_RANGE)
+    aspect_ratio = rng.uniform(*CROP_ASPECT_RATIO_RANGE)
 
-    image = image.resize(
-        (reduced_width, reduced_height),
-        Image.Resampling.LANCZOS,
+    crop_width = min(
+        original_width,
+        max(1, round((target_area * aspect_ratio) ** 0.5)),
+    )
+    crop_height = min(
+        original_height,
+        max(1, round((target_area / aspect_ratio) ** 0.5)),
     )
 
-    return image.resize(
-        (original_width, original_height),
-        Image.Resampling.LANCZOS,
-    )
-
-
-def random_crop_roundtrip(
-    image: Image.Image,
-    retained_ratio: float,
-    rng: random.Random,
-) -> Image.Image:
-    width, height = image.size
-
-    crop_width = max(1, round(width * retained_ratio))
-    crop_height = max(1, round(height * retained_ratio))
-
-    max_left = width - crop_width
-    max_top = height - crop_height
-
+    max_left = original_width - crop_width
+    max_top = original_height - crop_height
     left = rng.randint(0, max_left) if max_left > 0 else 0
     top = rng.randint(0, max_top) if max_top > 0 else 0
 
-    image = image.crop(
-        (
-            left,
-            top,
-            left + crop_width,
-            top + crop_height,
-        )
+    cropped = image.crop(
+        (left, top, left + crop_width, top + crop_height)
     )
 
-    return image.resize(
-        (width, height),
-        Image.Resampling.LANCZOS,
+    # Si ripristina la dimensione originale: il detector applicherà poi
+    # esclusivamente il proprio preprocessing ufficiale.
+    return cropped.resize(
+        (original_width, original_height),
+        resample=_CROP_RESAMPLE,
     )
+
+
+def _gaussian_blur(image: Image.Image, rng: random.Random) -> Image.Image:
+    radius = rng.uniform(*BLUR_RADIUS_RANGE)
+    return image.filter(ImageFilter.GaussianBlur(radius=radius))
+
+
+def _jpeg_compression(image: Image.Image, rng: random.Random) -> Image.Image:
+    quality = rng.randint(*JPEG_QUALITY_RANGE)
+
+    buffer = io.BytesIO()
+    image.save(
+        buffer,
+        format="JPEG",
+        quality=quality,
+        subsampling=2,
+        optimize=False,
+        progressive=False,
+    )
+    buffer.seek(0)
+
+    with Image.open(buffer) as decoded:
+        return decoded.convert("RGB").copy()
 
 
 def apply_social_like(
     image: Image.Image,
     image_path: str,
-    base_seed: int = 42,
-    social_probability: float = 0.7,
-) -> tuple[Image.Image, dict]:
-    rng = random.Random(
-        deterministic_seed(image_path, base_seed)
-    )
+) -> Image.Image:
+    """
+    Applica il protocollo social-like in modo deterministico per image_path.
 
-    image = image.convert("RGB")
+    - SOCIAL_PROBABILITY decide se l'immagine resta clean o viene degradata.
+    - Se degradata, viene scelta almeno una trasformazione.
+    - Ogni trasformazione è selezionata indipendentemente con probabilità 0.5.
+    - Le trasformazioni selezionate sono sempre applicate nell'ordine definito
+      da SOCIAL_TRANSFORM_ORDER.
+    """
+    if not 0.0 <= SOCIAL_PROBABILITY <= 1.0:
+        raise ValueError(
+            "SOCIAL_PROBABILITY deve essere compresa tra 0 e 1."
+        )
 
-    metadata = {
-        "social_applied": False,
-        "resize_scale": None,
-        "crop_ratio": None,
-        "blur_radius": None,
-        "jpeg_quality": None,
+    rng = _rng_for_image(image_path)
+    result = image.convert("RGB")
+
+    if rng.random() >= SOCIAL_PROBABILITY:
+        return result.copy()
+
+    selected = {
+        name: (rng.random() < 0.5)
+        for name in SOCIAL_TRANSFORM_ORDER
     }
 
-    if rng.random() >= social_probability:
-        return image, metadata
+    if not any(selected.values()):
+        selected[rng.choice(SOCIAL_TRANSFORM_ORDER)] = True
 
-    metadata["social_applied"] = True
+    if selected["resize_downsampling"]:
+        result = _resize_downsampling(result, rng)
 
-    # Riduzione della risoluzione.
-    if rng.random() < 0.7:
-        scale = rng.choice([0.4, 0.5, 0.65, 0.8])
-        image = resize_roundtrip(image, scale)
-        metadata["resize_scale"] = scale
+    if selected["crop"]:
+        result = _crop(result, rng)
 
-    # Crop moderato.
-    if rng.random() < 0.25:
-        crop_ratio = rng.choice([0.7, 0.8, 0.9])
-        image = random_crop_roundtrip(
-            image,
-            crop_ratio,
-            rng,
-        )
-        metadata["crop_ratio"] = crop_ratio
+    if selected["gaussian_blur"]:
+        result = _gaussian_blur(result, rng)
 
-    # Blur leggero.
-    if rng.random() < 0.15:
-        radius = rng.choice([0.4, 0.7, 1.0])
-        image = image.filter(
-            ImageFilter.GaussianBlur(radius)
-        )
-        metadata["blur_radius"] = radius
+    if selected["jpeg_compression"]:
+        result = _jpeg_compression(result, rng)
 
-    # Compressione quasi sempre presente.
-    if rng.random() < 0.8:
-        quality = rng.choice([40, 50, 60, 70, 80])
-        image = jpeg_compression(image, quality)
-        metadata["jpeg_quality"] = quality
-
-    return image, metadata
+    return result

@@ -11,19 +11,14 @@
 
 set -euo pipefail
 
-if [[ $# -ne 4 ]]; then
-    echo "Uso:"
-    echo "  sbatch detection_CoDE_social_like.sbatch \\"
-    echo "    CLASSIFIER HF_REVISION SOCIAL_PROBABILITY SOCIAL_SEED"
-    echo
+if [[ $# -ne 2 ]]; then
+    echo "Uso: sbatch detection_CoDE_social_like.sbatch CLASSIFIER HF_REVISION"
     echo "CLASSIFIER: linear | knn | svm"
     exit 1
 fi
 
 CLASSIFIER="$1"
 HF_REVISION="$2"
-SOCIAL_PROBABILITY="$3"
-SOCIAL_SEED="$4"
 
 case "${CLASSIFIER}" in
     linear|knn|svm)
@@ -40,48 +35,52 @@ if [[ -z "${HF_REVISION}" ]]; then
     exit 1
 fi
 
-if ! [[ "${SOCIAL_SEED}" =~ ^[0-9]+$ ]]; then
-    echo "SOCIAL_SEED deve essere un intero non negativo: ${SOCIAL_SEED}"
+SCRIPT_DIR="/homes/mlusvarghi/cvcs2026/scripts/detection_from_paper_social_like"
+SCRIPT_NAME="detection_CoDE_social_like.py"
+DEGRADATION_MODULE="${SCRIPT_DIR}/degradation_social_like.py"
+OUTPUT_ROOT="/work/cvcs2026/resnet_gang/outputs/CoDE/detection_from_paper_social_like"
+
+if [[ ! -f "${SCRIPT_DIR}/${SCRIPT_NAME}" ]]; then
+    echo "Script Python non trovato: ${SCRIPT_DIR}/${SCRIPT_NAME}"
     exit 1
 fi
 
-SCRIPT_NAME="detection_CoDE_social_like.py"
+if [[ ! -f "${DEGRADATION_MODULE}" ]]; then
+    echo "Modulo social-like non trovato: ${DEGRADATION_MODULE}"
+    exit 1
+fi
 
-PROJECT_ROOT="/homes/mlusvarghi/cvcs2026"
-WORK_ROOT="/work/cvcs2026/resnet_gang"
+mkdir -p /work/cvcs2026/resnet_gang/logs
+mkdir -p "${OUTPUT_ROOT}/${CLASSIFIER}"
 
-mkdir -p "${WORK_ROOT}/logs"
-mkdir -p "${WORK_ROOT}/outputs/CoDE/detection_from_paper_social_like"
-
-cd "${PROJECT_ROOT}"
+cd /homes/mlusvarghi/cvcs2026
 
 module load python/3.10.16-gcc-11.4.0
+source /work/cvcs2026/resnet_gang/env.sh
 
-source "${WORK_ROOT}/env.sh"
-
-export HF_HOME="${WORK_ROOT}/.cache/huggingface"
-export TRANSFORMERS_CACHE="${WORK_ROOT}/.cache/huggingface"
+export HF_HOME=/work/cvcs2026/resnet_gang/.cache/huggingface
+export TRANSFORMERS_CACHE=/work/cvcs2026/resnet_gang/.cache/huggingface
 export TOKENIZERS_PARALLELISM=false
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 
+# Rende importabile degradation_social_like.py anche se cambia la cwd.
+export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}"
+
 echo "============================================================"
-echo "START:               $(date --iso-8601=seconds)"
-echo "JOB ID:              ${SLURM_JOB_ID}"
-echo "JOB NAME:            ${SLURM_JOB_NAME}"
-echo "HOST:                $(hostname)"
-echo "CLASSIFIER:          ${CLASSIFIER}"
-echo "HF REVISION:         ${HF_REVISION}"
-echo "SOCIAL PROBABILITY:  ${SOCIAL_PROBABILITY}"
-echo "SOCIAL SEED:         ${SOCIAL_SEED}"
-echo "SCRIPT:              scripts/detection_from_paper_social_like/${SCRIPT_NAME}"
+echo "START:        $(date --iso-8601=seconds)"
+echo "JOB ID:       ${SLURM_JOB_ID}"
+echo "JOB NAME:     ${SLURM_JOB_NAME}"
+echo "HOST:         $(hostname)"
+echo "CLASSIFIER:   ${CLASSIFIER}"
+echo "HF REVISION:  ${HF_REVISION}"
+echo "SCRIPT:       ${SCRIPT_DIR}/${SCRIPT_NAME}"
+echo "DEGRADATION:  ${DEGRADATION_MODULE}"
+echo "OUTPUT:       ${OUTPUT_ROOT}/${CLASSIFIER}"
 echo "============================================================"
 
-python -u \
-    "scripts/detection_from_paper_social_like/${SCRIPT_NAME}" \
+python -u "${SCRIPT_DIR}/${SCRIPT_NAME}" \
     --classifier "${CLASSIFIER}" \
-    --revision "${HF_REVISION}" \
-    --social-probability "${SOCIAL_PROBABILITY}" \
-    --social-seed "${SOCIAL_SEED}"
+    --revision "${HF_REVISION}"
 
 echo "END: $(date --iso-8601=seconds)"

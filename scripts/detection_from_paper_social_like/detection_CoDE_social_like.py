@@ -17,8 +17,6 @@ import torch
 import torch.nn as nn
 import transformers
 from huggingface_hub import hf_hub_download
-from degradation_social_like import apply_social_like
-
 from PIL import Image, ImageFile
 from sklearn.metrics import (
     accuracy_score,
@@ -33,6 +31,14 @@ from sklearn.metrics import (
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from tqdm import tqdm
+
+import degradation_social_like as social_module
+from degradation_social_like import (
+    SOCIAL_PROBABILITY,
+    SOCIAL_PROTOCOL_NAME,
+    SOCIAL_SEED,
+    apply_social_like,
+)
 
 
 # ============================================================
@@ -106,8 +112,8 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Esegue il detector CoDE ufficiale su OpenFake con "
-            "preprocessing, backbone e classificatore ufficiali."
+            "Esegue il detector CoDE ufficiale su OpenFake dopo una "
+            "degradazione social-like deterministica condivisa."
         )
     )
     parser.add_argument(
@@ -120,40 +126,7 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help="Commit SHA Hugging Face fissato dal launcher.",
     )
-    
-    parser.add_argument(
-        "--social-probability",
-        type=float,
-        required=True,
-        help=(
-            "Probabilità che una singola immagine subisca "
-            "la pipeline di degradazione social-like."
-        ),
-    )
-
-    parser.add_argument(
-        "--social-seed",
-        type=int,
-        required=True,
-        help=(
-            "Seed usato per rendere deterministiche le "
-            "degradazioni rispetto al path dell'immagine."
-        ),
-    )
-
-    args = parser.parse_args()
-
-    if not 0.0 <= args.social_probability <= 1.0:
-        parser.error(
-            "--social-probability deve essere compresa tra 0 e 1."
-        )
-
-    if args.social_seed < 0:
-        parser.error(
-            "--social-seed deve essere maggiore o uguale a zero."
-        )
-
-    return args
+    return parser.parse_args()
 
 
 # ============================================================
@@ -309,15 +282,8 @@ def load_jsonl_records():
 # ============================================================
 
 class OpenFakeDataset(Dataset):
-    def __init__(
-        self,
-        records: list[dict[str, Any]],
-        social_probability: float,
-        social_seed: int,
-    ) -> None:
+    def __init__(self, records: list[dict[str, Any]]) -> None:
         self.records = records
-        self.social_probability = float(social_probability)
-        self.social_seed = int(social_seed)
 
     def __len__(self) -> int:
         return len(self.records)
@@ -333,16 +299,12 @@ class OpenFakeDataset(Dataset):
                 image = apply_social_like(
                     image=image,
                     image_path=str(image_path),
-                    probability=self.social_probability,
-                    base_seed=self.social_seed,
                 )
 
                 image_tensor = OFFICIAL_TRANSFORM(image)
-
         except Exception as exc:
             raise RuntimeError(
-                f"Errore durante la lettura di "
-                f"{image_path}: {exc}"
+                f"Errore durante la lettura di {image_path}: {exc}"
             ) from exc
 
         return (
@@ -352,6 +314,7 @@ class OpenFakeDataset(Dataset):
             record["image_path"],
             record["original_json"],
         )
+
 
 # ============================================================
 # MODEL AND CLASSIFIER
@@ -688,11 +651,7 @@ def main() -> None:
             f"Prime occorrenze:\n{preview}"
         )
 
-    dataset = OpenFakeDataset(
-        records=records,
-        social_probability=args.social_probability,
-        social_seed=args.social_seed,
-    )
+    dataset = OpenFakeDataset(records)
 
     loader = DataLoader(
         dataset,
@@ -710,11 +669,9 @@ def main() -> None:
     print(f"[INFO] device: {device}")
     print(f"[INFO] classifier: {classifier_name}")
     print(f"[INFO] HF revision: {revision}")
-    print(
-        f"[INFO] social probability: "
-        f"{args.social_probability}"
-    )
-    print(f"[INFO] social seed: {args.social_seed}")
+    print(f"[INFO] social protocol: {SOCIAL_PROTOCOL_NAME}")
+    print(f"[INFO] social probability: {SOCIAL_PROBABILITY}")
+    print(f"[INFO] social seed: {SOCIAL_SEED}")
 
     model = load_backbone(
         revision=revision,
@@ -888,7 +845,48 @@ def main() -> None:
         "feature_dtype": str(features.dtype),
         "feature_l2_norm_mean": float(feature_norms.mean()),
         "feature_l2_norm_std": float(feature_norms.std()),
+        "social_like": {
+            "protocol_name": SOCIAL_PROTOCOL_NAME,
+            "probability": SOCIAL_PROBABILITY,
+            "seed": SOCIAL_SEED,
+            "module_path": str(Path(social_module.__file__).resolve()),
+            "module_sha256": sha256_file(
+                Path(social_module.__file__).resolve()
+            ),
+            "transformation_order": list(
+                social_module.SOCIAL_TRANSFORM_ORDER
+            ),
+            "application_order": [
+                "original_openfake_image",
+                "deterministic_social_like_degradation",
+                "official_code_preprocessing",
+                "code_backbone",
+                "official_code_classifier",
+            ],
+            "selection_rule": (
+                "Per-image deterministic SHA256 seed derived from "
+                "protocol name, SOCIAL_SEED and normalized image path"
+            ),
+            "intensities": {
+                "resize_scale_range": list(
+                    social_module.RESIZE_SCALE_RANGE
+                ),
+                "crop_area_range": list(
+                    social_module.CROP_AREA_RANGE
+                ),
+                "crop_aspect_ratio_range": list(
+                    social_module.CROP_ASPECT_RATIO_RANGE
+                ),
+                "blur_radius_range": list(
+                    social_module.BLUR_RADIUS_RANGE
+                ),
+                "jpeg_quality_range": list(
+                    social_module.JPEG_QUALITY_RANGE
+                ),
+            },
+        },
         "preprocessing": {
+            "order": "after social-like degradation",
             "resize": False,
             "center_crop": 224,
             "to_tensor": True,

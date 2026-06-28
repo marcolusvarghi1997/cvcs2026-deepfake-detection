@@ -12,7 +12,18 @@ import pandas as pd
 import sklearn
 import torch
 import torchvision
-from social_like import apply_social_like
+from degradation_social_like import (
+    BLUR_RADIUS_RANGE,
+    CROP_AREA_RANGE,
+    CROP_ASPECT_RATIO_RANGE,
+    JPEG_QUALITY_RANGE,
+    RESIZE_SCALE_RANGE,
+    SOCIAL_PROBABILITY,
+    SOCIAL_PROTOCOL_NAME,
+    SOCIAL_SEED,
+    SOCIAL_TRANSFORM_ORDER,
+    apply_social_like,
+)
 
 from PIL import Image, ImageFile
 from sklearn.metrics import (
@@ -51,7 +62,7 @@ JSONL_PATH = Path(
 
 OUTPUT_DIR = Path(
     "/work/cvcs2026/resnet_gang/outputs/CLIP/"
-    "detection_from_paper"
+    "detection_from_paper_social_like"
 )
 
 ARCHITECTURE = "CLIP:ViT-L/14"
@@ -303,9 +314,14 @@ class OpenFakeDataset(Dataset):
 
         try:
             with Image.open(image_path) as image:
-                image_tensor = OFFICIAL_TRANSFORM(
-                    image.convert("RGB")
+                image = image.convert("RGB")
+
+                image = apply_social_like(
+                    image=image,
+                    image_path=str(image_path),
                 )
+
+                image_tensor = OFFICIAL_TRANSFORM(image)
         except Exception as exc:
             raise RuntimeError(
                 f"Errore durante la lettura di "
@@ -326,6 +342,28 @@ class OpenFakeDataset(Dataset):
 # ============================================================
 
 def import_official_model_factory():
+    """
+    Importa UniversalFakeDetect aggiungendo una compatibilità per le
+    versioni recenti di setuptools nelle quali pkg_resources può non
+    essere installato.
+
+    Il repository ufficiale esegue:
+        from pkg_resources import packaging
+
+    Se pkg_resources non è disponibile, viene creato esclusivamente
+    durante questa esecuzione un modulo compatibile che espone
+    packaging, senza modificare i file del repository.
+    """
+    try:
+        import pkg_resources  # noqa: F401
+    except ModuleNotFoundError:
+        import types
+        import packaging
+
+        pkg_resources_compat = types.ModuleType("pkg_resources")
+        pkg_resources_compat.packaging = packaging
+        sys.modules["pkg_resources"] = pkg_resources_compat
+
     if not UFD_REPO.is_dir():
         raise FileNotFoundError(
             "Repository UniversalFakeDetect non trovato: "
@@ -409,7 +447,7 @@ def run_inference(
             batch_original_json,
         ) in tqdm(
             loader,
-            desc="UniversalFakeDetect official inference",
+            desc="UniversalFakeDetect social-like inference",
             unit="batch",
         ):
             images = images.to(
@@ -884,6 +922,10 @@ def main() -> None:
         axis=1,
     )
 
+    degradation_module_path = Path(
+        sys.modules[apply_social_like.__module__].__file__
+    ).resolve()
+
     run_info = {
         "detector": "UniversalFakeDetect",
         "architecture": ARCHITECTURE,
@@ -942,6 +984,32 @@ def main() -> None:
         "label_mapping": {
             "ground_truth": "0=Real, 1=Fake",
             "prediction": "0=Real, 1=Fake",
+        },
+        "social_like": {
+            "protocol_name": SOCIAL_PROTOCOL_NAME,
+            "probability": SOCIAL_PROBABILITY,
+            "seed": SOCIAL_SEED,
+            "module_path": str(degradation_module_path),
+            "module_sha256": sha256_file(degradation_module_path),
+            "transform_order": list(SOCIAL_TRANSFORM_ORDER),
+            "intensity_ranges": {
+                "resize_scale": list(RESIZE_SCALE_RANGE),
+                "crop_area": list(CROP_AREA_RANGE),
+                "crop_aspect_ratio": list(CROP_ASPECT_RATIO_RANGE),
+                "gaussian_blur_radius": list(BLUR_RADIUS_RANGE),
+                "jpeg_quality": list(JPEG_QUALITY_RANGE),
+            },
+            "application_order": [
+                "OpenFake original image",
+                "deterministic social-like degradation",
+                "official UniversalFakeDetect preprocessing",
+                "CLIP ViT-L/14 backbone",
+                "official UniversalFakeDetect linear classifier",
+            ],
+            "path_seed_definition": (
+                "SHA256(protocol_name + NUL + seed + NUL + "
+                "absolute normalized image path)"
+            ),
         },
         "software": {
             "python": sys.version,

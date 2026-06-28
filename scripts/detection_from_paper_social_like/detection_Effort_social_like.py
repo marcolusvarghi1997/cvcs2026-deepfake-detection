@@ -12,7 +12,6 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
-import cv2
 import numpy as np
 import pandas as pd
 import torch
@@ -30,8 +29,17 @@ from sklearn.metrics import (
 from torch.utils.data import DataLoader, Dataset
 from torchvision.transforms import functional as TF
 from tqdm import tqdm
-from PIL import Image
-from social_like import apply_social_like
+from PIL import Image, ImageFile
+
+from degradation_social_like import (
+    SOCIAL_PROBABILITY,
+    SOCIAL_PROTOCOL_NAME,
+    SOCIAL_SEED,
+    SOCIAL_TRANSFORM_ORDER,
+    apply_social_like,
+)
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 
@@ -67,8 +75,8 @@ GENERATOR_FIELDS = (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Valuta un singolo checkpoint Effort direttamente sulle immagini "
-            "complete indicate dal JSONL OpenFake, senza face detection o face crop."
+            "Valuta un singolo checkpoint Effort su OpenFake con degradazione "
+            "social-like deterministica, senza face detection o face crop."
         )
     )
 
@@ -263,19 +271,25 @@ class OpenFakeDataset(Dataset):
         record = self.records[index]
         image_path = record["image_path"]
 
-        image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+        try:
+            with Image.open(image_path) as image:
+                image = image.convert("RGB")
 
-        if image is None:
-            raise RuntimeError(f"Impossibile leggere immagine: {image_path}")
+                image = apply_social_like(
+                    image=image,
+                    image_path=str(image_path),
+                )
 
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        image = cv2.resize(
-            image,
-            (self.resolution, self.resolution),
-            interpolation=cv2.INTER_CUBIC,
-        )
+                image = image.resize(
+                    (self.resolution, self.resolution),
+                    resample=Image.Resampling.BICUBIC,
+                )
 
-        image_tensor = TF.to_tensor(image)
+                image_tensor = TF.to_tensor(image)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Errore durante lettura/preprocessing di {image_path}: {exc}"
+            ) from exc
         image_tensor = TF.normalize(
             image_tensor,
             mean=self.mean,
@@ -756,12 +770,15 @@ def main() -> None:
         if args.image_root is not None
         else None
     )
+    degradation_module_path = Path(__file__).resolve().parent / "degradation_social_like.py"
+
 
     for required_path in (
         deepfakebench_root,
         config_path,
         weights_path,
         jsonl_path,
+        degradation_module_path,
     ):
         if not required_path.exists():
             raise FileNotFoundError(f"Percorso non trovato: {required_path}")
@@ -793,7 +810,14 @@ def main() -> None:
 
     records = load_records(jsonl_path, image_root)
     print(f"Record OpenFake: {len(records)}")
-    print("Preprocessing: immagine completa, resize e normalizzazione; nessun face crop")
+    print(
+        "Preprocessing: immagine RGB -> degradazione social-like deterministica "
+        "-> resize -> normalizzazione; nessun face crop"
+    )
+    print(
+        f"Protocollo social-like: {SOCIAL_PROTOCOL_NAME}, "
+        f"probability={SOCIAL_PROBABILITY}, seed={SOCIAL_SEED}"
+    )
 
     missing_images = [
         record["image_path"]
@@ -942,7 +966,30 @@ def main() -> None:
             "amp": amp_enabled,
             "device": str(device),
             "gpu_name": torch.cuda.get_device_name(0),
-            "preprocessing": "whole_image_rgb_resize_normalize_no_face_detection",
+            "preprocessing": (
+                "whole_image_rgb_social_like_resize_normalize_no_face_detection"
+            ),
+            "social_like": {
+                "protocol_name": SOCIAL_PROTOCOL_NAME,
+                "probability": SOCIAL_PROBABILITY,
+                "seed": SOCIAL_SEED,
+                "module_path": str(degradation_module_path),
+                "module_sha256": sha256_file(degradation_module_path),
+                "transform_order": list(SOCIAL_TRANSFORM_ORDER),
+                "application_order": [
+                    "open_original_openfake_image",
+                    "convert_rgb",
+                    "apply_social_like",
+                    "effort_resize_bicubic",
+                    "effort_to_tensor",
+                    "effort_normalize",
+                    "effort_detector",
+                ],
+                "path_seed_definition": (
+                    "SHA256(protocol_name + NUL + social_seed + NUL + "
+                    "absolute_normalized_image_path)"
+                ),
+            },
             "elapsed_seconds": float(elapsed_seconds),
             "samples_per_second": float(
                 len(dataframe) / elapsed_seconds

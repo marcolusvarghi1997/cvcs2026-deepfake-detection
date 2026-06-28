@@ -12,7 +12,7 @@
 set -euo pipefail
 
 if [[ $# -ne 2 ]]; then
-    echo "Uso: sbatch detection_Effort_official.sbatch EFFORT_VARIANT WEIGHTS_PATH"
+    echo "Uso: sbatch detection_Effort_social_like.sbatch EFFORT_VARIANT WEIGHTS_PATH"
     echo "EFFORT_VARIANT: sdv14 | chameleon"
     exit 1
 fi
@@ -40,36 +40,51 @@ if [[ ! -f "${WEIGHTS_PATH}" ]]; then
     exit 1
 fi
 
-SCRIPT_NAME="detection_Effort_openfake.py"
+SCRIPT_NAME="detection_Effort_social_like.py"
+SCRIPT_DIR="/homes/mlusvarghi/cvcs2026/scripts/detection_from_paper_social_like"
 
 DEEPFAKEBENCH_ROOT="/work/cvcs2026/resnet_gang/external/Effort-AIGI-Detection/DeepfakeBench"
 CONFIG_PATH="${DEEPFAKEBENCH_ROOT}/training/config/detector/effort.yaml"
-
 JSONL_PATH="/work/cvcs2026/resnet_gang/datasets/json_standardized/json/openfake.jsonl"
-
-OUTPUT_ROOT="/work/cvcs2026/resnet_gang/results/Effort/openfake"
-
+OUTPUT_ROOT="/work/cvcs2026/resnet_gang/outputs/Effort/detection_from_paper_social_like"
 DETECTOR_ID="effort_${EFFORT_VARIANT}"
 
-cd /work/cvcs2026/resnet_gang
+if [[ ! -f "${CONFIG_PATH}" ]]; then
+    echo "Config non trovato: ${CONFIG_PATH}"
+    exit 1
+fi
 
+if [[ ! -f "${JSONL_PATH}" ]]; then
+    echo "JSONL non trovato: ${JSONL_PATH}"
+    exit 1
+fi
+
+if [[ ! -f "${SCRIPT_DIR}/${SCRIPT_NAME}" ]]; then
+    echo "Script Python non trovato: ${SCRIPT_DIR}/${SCRIPT_NAME}"
+    exit 1
+fi
+
+if [[ ! -f "${SCRIPT_DIR}/degradation_social_like.py" ]]; then
+    echo "Modulo social-like non trovato: ${SCRIPT_DIR}/degradation_social_like.py"
+    exit 1
+fi
+
+cd /work/cvcs2026/resnet_gang
 mkdir -p logs
 mkdir -p "${OUTPUT_ROOT}"
 
 cd /homes/mlusvarghi/cvcs2026
 
 module load python/3.10.16-gcc-11.4.0
-
 source /work/cvcs2026/resnet_gang/env.sh
 
 export HF_HOME=/work/cvcs2026/resnet_gang/.cache/huggingface
 export TRANSFORMERS_CACHE=/work/cvcs2026/resnet_gang/.cache/huggingface
 export TOKENIZERS_PARALLELISM=false
-
-export PYTHONPATH="${DEEPFAKEBENCH_ROOT}/training:${DEEPFAKEBENCH_ROOT}:${PYTHONPATH:-}"
-
+export PYTHONPATH="${DEEPFAKEBENCH_ROOT}/training:${DEEPFAKEBENCH_ROOT}:${SCRIPT_DIR}:${PYTHONPATH:-}"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
+export PYTHONUNBUFFERED=1
 
 echo "============================================================"
 echo "START:              $(date --iso-8601=seconds)"
@@ -82,7 +97,7 @@ echo "WEIGHTS:            ${WEIGHTS_PATH}"
 echo "CONFIG:             ${CONFIG_PATH}"
 echo "OPENFAKE JSONL:     ${JSONL_PATH}"
 echo "OUTPUT ROOT:        ${OUTPUT_ROOT}"
-echo "SCRIPT:             scripts/detection_from_paper/${SCRIPT_NAME}"
+echo "SCRIPT:             ${SCRIPT_DIR}/${SCRIPT_NAME}"
 echo "============================================================"
 
 python - <<'PY'
@@ -98,7 +113,7 @@ print("GPU:", torch.cuda.get_device_name(0))
 print("CUDA build:", torch.version.cuda)
 PY
 
-python -u "scripts/detection_from_paper/${SCRIPT_NAME}" \
+python -u "${SCRIPT_DIR}/${SCRIPT_NAME}" \
     --detector-id "${DETECTOR_ID}" \
     --config "${CONFIG_PATH}" \
     --weights "${WEIGHTS_PATH}" \
