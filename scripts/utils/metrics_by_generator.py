@@ -22,17 +22,17 @@ from sklearn.metrics import (
 # ============================================================
 
 INPUT_CSV = Path(
-    "/work/cvcs2026/resnet_gang/outputs/CoDE/detection_from_paper/knn/predictions_test.csv"
+    "/work/cvcs2026/resnet_gang/outputs/CLIP/detection_from_paper_social_like/linear/predictions_test.csv"
 )
 
 OUTPUT_CSV = Path(
-    "/work/cvcs2026/resnet_gang/outputs/CoDE/"
-    "detection_from_paper/knn/metrics_test_by_generator.csv"
+    "/work/cvcs2026/resnet_gang/outputs/CLIP/"
+    "detection_from_paper_social_like/linear/metrics_test_by_generator.csv"
 )
 
-ARCHITECTURE = "CoDE"
+ARCHITECTURE = "CLIP"
 PROTOCOL = "openfake"
-CLASSIFIER = "knn"
+CLASSIFIER = "linear"
 
 # Colonne presenti nel file predictions_test.csv
 LABEL_COLUMN = "label"

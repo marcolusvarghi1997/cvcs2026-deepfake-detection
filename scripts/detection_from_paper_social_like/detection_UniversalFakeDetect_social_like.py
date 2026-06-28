@@ -61,8 +61,7 @@ JSONL_PATH = Path(
 )
 
 OUTPUT_DIR = Path(
-    "/work/cvcs2026/resnet_gang/outputs/CLIP/"
-    "detection_from_paper_social_like"
+    "/work/cvcs2026/resnet_gang/outputs/CLIP/detection_from_paper_social_like/linear"
 )
 
 ARCHITECTURE = "CLIP:ViT-L/14"
