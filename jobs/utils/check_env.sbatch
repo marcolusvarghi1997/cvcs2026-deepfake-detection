@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=check_env2
-#SBATCH --partition=boost_usr_prod
+#SBATCH --partition=all_usr_prod
 #SBATCH --account=cvcs2026
 #SBATCH --qos=all_qos_dbg
 #SBATCH --time=1:00:00
