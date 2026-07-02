@@ -65,7 +65,7 @@ print("\n" + "=" * 80, flush=True)
 print("LOADED MODULES", flush=True)
 print("=" * 80, flush=True)
 
-run("module list")
+run("bash -lc 'module list'")
 
 print("\n" + "=" * 80, flush=True)
 print("GPU CHECK", flush=True)
